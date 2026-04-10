@@ -1,4 +1,4 @@
-python/build_exe.py
 python/settings.json
 python/dist
-
+python/build
+python/DittoX.spec
