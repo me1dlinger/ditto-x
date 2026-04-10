@@ -660,7 +660,7 @@ if __name__ == '__main__':
         s.listen(1)
     except OSError:
         try:
-            ctypes.windll.user32.MessageBoxW(0, "Ditto Reader 已在运行，点击确定打开页面。", "Ditto Reader", 0x00000040 | 0x00001000)
+            ctypes.windll.user32.MessageBoxW(0, "DittoX 已在运行，点击确定打开页面。", "DittoX", 0x00000040 | 0x00001000)
         except Exception:
             pass
         try:
@@ -693,10 +693,10 @@ if __name__ == '__main__':
         from pystray import Icon, Menu, MenuItem
         from PIL import Image
         
-        icon_path = get_resource_path('assets/ditto-x.ico')
+        icon_path = get_resource_path('static/icon/ditto-x.ico')
         if not os.path.exists(icon_path):
              # Fallback for development if assets is in parent dir
-             icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'assets', 'ditto-x.ico'))
+             icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static/icon', 'ditto-x.ico'))
 
         if os.path.exists(icon_path):
             img = Image.open(icon_path)
@@ -718,11 +718,11 @@ if __name__ == '__main__':
             os._exit(0)
 
         menu = Menu(MenuItem('打开浏览器', open_browser), MenuItem('退出', quit_app))
-        icon = Icon('DittoReader', img, 'Ditto Reader', menu)
+        icon = Icon('DittoReader', img, 'DittoX', menu)
         
         # Show toast notification
         if ready:
-            icon.notify("Ditto Reader 已启动", "服务已运行在 http://127.0.0.1:53980/")
+            icon.notify("DittoX 已启动", "服务已运行在 http://127.0.0.1:53980/")
             
         icon.run()
     except Exception:

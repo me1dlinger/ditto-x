@@ -7,7 +7,7 @@ entry_point = os.path.join('app.py')
 
 # Define paths for assets and templates
 templates_path = os.path.join('templates')
-assets_path = 'assets'
+assets_path = 'static/icon'
 icon_path = os.path.join(assets_path, 'ditto-x.ico')
 
 # PyInstaller arguments
@@ -19,7 +19,7 @@ args = [
     '--name=DittoX',   # Name of the executable
     # Add templates and assets folder
     f'--add-data={templates_path};templates',
-    f'--add-data={assets_path};assets',
+    f'--add-data={assets_path};static/icon',
     # Exclude unnecessary modules to reduce size
     '--exclude-module=tkinter',
     '--exclude-module=unittest',
