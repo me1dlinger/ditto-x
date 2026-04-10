@@ -1,3 +1,4 @@
-build_exe.py
-dist
+python/build_exe.py
 python/settings.json
+python/dist
+
