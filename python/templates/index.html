@@ -539,7 +539,7 @@
         }
 
         .badge-image {
-            background: rgba(155, 114, 224, 0.15);
+            background: rgba(192, 110, 247, 0.15);
             color: var(--purple);
         }
 
@@ -548,12 +548,7 @@
             color: var(--orange);
         }
 
-        .badge-html {
-            background: rgba(61, 186, 106, 0.15);
-            color: var(--green);
-        }
-
-        .badge-rtf {
+        .badge-richtext {
             background: rgba(212, 168, 71, 0.15);
             color: var(--yellow);
         }
@@ -1725,10 +1720,9 @@
                         <div class="filter-group">
                             <button class="filter-pill active" data-type="">全部</button>
                             <button class="filter-pill" data-type="text">文本</button>
-                            <button class="filter-pill green" data-type="html">HTML</button>
-                            <button class="filter-pill orange" data-type="file">文件</button>
+                            <button class="filter-pill green" data-type="richtext">富文本</button>
+                            <button class="filter-pill orange" data-type="file">文件路径</button>
                             <button class="filter-pill purple" data-type="image">图片</button>
-                            <button class="filter-pill yellow" data-type="rtf">富文本</button>
                         </div>
                     </div>
 
@@ -2047,20 +2041,30 @@
                 return;
             }
             list.innerHTML = clips.map(c => {
-                const typeClass = `type-${c.type}`;
-                const badgeMap = { image: 'image', file: 'file', html: 'HTML', rtf: 'RTF', text: 'text' };
+                const dotClass = ['screenshot', 'copied_image', 'web_image'].includes(c.type)
+                    ? 'type-image' : `type-${c.type}`;
+                const badgeClass = ['screenshot', 'copied_image', 'web_image'].includes(c.type)
+                    ? 'badge-image' : `badge-${c.type}`;
+                const badgeMap = {
+                    screenshot: '截图',
+                    copied_image: '本地图片',
+                    web_image: '网页图片',
+                    file: '文件路径',
+                    richtext: '富文本',
+                    text: '文本',
+                };
                 const badge = badgeMap[c.type] || c.type;
                 const displayText = c.text || (c.type === 'image' ? '[图片]' : '[空]');
                 const hl = highlight(displayText.slice(0, 200), state.q);
                 return `
-      <div class="clip-item ${typeClass} ${state.selectedId === c.id ? 'selected' : ''}"
+      <div class="clip-item ${dotClass} ${state.selectedId === c.id ? 'selected' : ''}"
            data-id="${c.id}" data-type="${c.type}">
         <div class="clip-type-dot"></div>
         <div class="clip-body">
           <div class="clip-text">${hl}</div>
           <div class="clip-meta">
             <span class="clip-date">${fmtDate(c.date)}</span>
-            <span class="clip-badge badge-${c.type}">${badge}</span>
+            <span class="clip-badge ${badgeClass}">${badge}</span>
             ${c.pinned ? '<span class="clip-badge badge-pinned">置顶</span>' : ''}
           </div>
         </div>
@@ -2098,7 +2102,14 @@
 
         function renderDetail(d) {
             // Meta
-            const badgeMap = { image: 'image', file: 'file_path', html: 'HTML', rtf: 'RTF', text: '文本' };
+            const badgeMap = {
+                screenshot: '截图',
+                copied_image: '本地图片',
+                web_image: '网页图片',
+                file: '文件路径',
+                richtext: '富文本',
+                text: '文本',
+            };
             $('detail-meta').innerHTML = `
     <span class="clip-badge badge-${d.type}">${badgeMap[d.type] || d.type}</span>
     <span class="clip-badge" style="background:var(--panel);color:var(--text2)">${fmtDateFull(d.date)}</span>
@@ -2107,7 +2118,7 @@
 
             // Body
             const body = $('detail-body');
-            if (d.type === 'image') {
+            if (['screenshot', 'copied_image', 'web_image'].includes(d.type)) {
                 const src = `/api/clip/${d.id}/image`;
                 body.innerHTML = `<div class="detail-image-content">
       <img src="${src}" alt="图片" loading="lazy" onclick="openImagePreview('${src}')">
@@ -2159,10 +2170,9 @@
                 grid.innerHTML = [
                     ['总条目', d.total],
                     ['图片', d.images],
-                    ['文件', d.files],
-                    ['HTML', d.html],
-                    ['文本', d.text],
-                    ['置顶项', d.pinned],
+                    ['文件路径', d.files],
+                    ['富文本', d.richtext],
+                    ['纯文本', d.text],
                     ['活跃天数', d.active_days],
                     ['日均复制', d.avg_per_day],
                 ].map(([label, val]) => `
@@ -2240,16 +2250,18 @@
                     const legend = $('space-legend');
                     card.style.display = '';
 
-                    // 配色：文本、图片、HTML、富文本、文件
                     const COLORS = {
                         text: '#4f8ef7',
-                        image: '#9b72e0',
-                        html: '#3dba6a',
-                        rtf: '#d4a847',
+                        richtext: '#d4a847',
+                        image: '#c06ef7',
                         file: '#e8833a',
                     };
-                    const LABELS = { text: '文本', image: '图片', html: 'HTML', rtf: '富文本', file: '文件' };
-
+                    const LABELS = {
+                        text: '纯文本',
+                        richtext: '富文本',
+                        image: '图片',
+                        file: '文件路径',
+                    };
                     const total = sv.total_bytes || 1;
 
                     function fmtBytes(b) {

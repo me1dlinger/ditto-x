@@ -66,7 +66,7 @@ def get_db():
         alt_path = os.path.join(os.path.dirname(__file__), db_path)
         if os.path.exists(alt_path):
             db_path = alt_path
-            
+
     uri = f"file:{db_path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -78,6 +78,7 @@ def get_db():
 
 def row_to_dict(row):
     return dict(row)
+
 
 def get_db_rw():
     """Open ditto.db in read-write mode for cleanup operations."""
@@ -94,47 +95,110 @@ def get_db_rw():
     return conn
 
 
-def _build_cleanup_query(rules):
-    """
-    Build list of (type, ids, bytes) for given rules.
-    Rule: { type, days, size_kb }
-    Logic: age > days AND ooData total size > size_kb (for image/file), 
-           for text: size refers to CF_UNICODETEXT length.
-    Pinned (lDontAutoDelete=1) records are always excluded.
-    """
-    import time
-    now_ts = int(time.time())
-
-    TYPE_FORMAT_MAP = {
-        'text':  ['CF_UNICODETEXT', 'CF_TEXT'],
-        'image': ['PNG', 'CF_DIB'],
-        'file':  ['CF_HDROP'],
-    }
-
-    results = []
-
-    # We need a temporary read-only conn for preview too; caller passes conn
-    return results, TYPE_FORMAT_MAP, now_ts
-
-FORMAT_PRIORITY = [
-    'CF_UNICODETEXT', 'CF_TEXT', 'HTML Format',
-    'Rich Text Format', 'CF_HDROP', 'PNG', 'CF_DIB',
-]
-
+# ── Fine-grained Type Detection ──────────────────────────────────────────────────────────────
+#
+# Type System:
+#   text          - Plain text (CF_TEXT / CF_UNICODETEXT, no HTML Format)
+#   richtext      - Rich text (HTML Format with background/font styles, or Rich Text Format)
+#                   Covers the original html / rtf types
+#   screenshot    - Screenshot (mText='CF_DIB', has CF_DIB but no PNG, no CF_HDROP, no HTML Format)
+#   copied_image  - Image copied from local software (mText starts with 'Copied File' and has CF_DIB)
+#   web_image     - Image copied from web (has PNG format)
+#   file          - File path (has CF_HDROP, no CF_DIB/PNG; mText contains 'Copied File' and no CF_DIB)
+#
+# Note: both copied_image and file may have mText = 'Copied File ...'
+#   Distinction: copied_image has CF_DIB; file has no CF_DIB but only CF_HDROP
 
 def detect_clip_type(mtext: str, formats: list[str]) -> str:
-    """Return a simple type tag."""
-    if (mtext == 'CF_DIB' and 'CF_TEXT' not in formats) or 'PNG' in formats or 'CF_DIB' in formats:
-        if 'PNG' in formats:
-            return 'image'
-        return 'image'
-    if 'CF_HDROP' in formats:
+    """
+    Returns the fine-grained type string.
+    """
+    has_png = 'PNG' in formats
+    has_dib = 'CF_DIB' in formats
+    has_hdrop = 'CF_HDROP' in formats
+    has_html = 'HTML Format' in formats
+    has_rtf = 'Rich Text Format' in formats
+    has_text = 'CF_UNICODETEXT' in formats and 'CF_TEXT' in formats
+
+    # ── Image Types ──
+    # Image copied from web: has PNG
+    if has_png:
+        return 'web_image'
+
+    # Image copied from local software: mText='Copied File...' and has CF_DIB
+    if  has_dib and has_hdrop:
+        return 'copied_image'
+
+    # Screenshot: mText='CF_DIB', has CF_DIB, no PNG, no CF_HDROP, no HTML Format
+    if mtext == 'CF_DIB' and has_dib:
+        return 'screenshot'
+
+    # ── File Path Types ──
+    # Has CF_HDROP and no image data (CF_DIB/PNG)
+    if has_hdrop and not has_dib and not has_png:
         return 'file'
-    if 'HTML Format' in formats:
-        return 'html'
-    if 'Rich Text Format' in formats:
-        return 'rtf'
+
+    # ── Rich Text Types (merged html + rtf) ──
+    # Has HTML Format (web copied text, rich text code, styled text)
+    if has_text and has_html:
+        return 'richtext'
+
+
+    # ── Plain Text ──
+    if has_text and not has_html and not has_rtf:
+        return 'text'
+
+    # Fallback
+    if mtext and mtext not in ('CF_DIB',):
+        return 'text'
     return 'text'
+
+
+# Used for API type parameter filtering → SQL conditions
+# Frontend can pass: text, richtext, image, file
+#   image  → Includes screenshot / copied_image / web_image
+#   file   → Only file (excluding images)
+def _type_filter_sql(ftype: str) -> str:
+    if ftype == 'image':
+        # Image copied from web: has PNG
+        # Screenshot: mText='CF_DIB', has CF_DIB, no PNG
+        # Image copied locally: has CF_DIB, has CF_HDROP
+        return """AND (
+            (
+                 (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')
+                AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_HDROP','PNG')))
+                OR (mText = 'CF_DIB' AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')))
+            )
+        )"""
+
+    elif ftype == 'file':
+        # Has CF_HDROP but no CF_DIB/PNG
+        return """AND (
+            (
+                lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_HDROP')
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_DIB','PNG'))
+            )
+        )"""
+
+    elif ftype == 'richtext':
+        # Has CF_UNICODETEXT, CF_TEXT, HTML Format
+        return """AND (
+             (mText = 'HTML Format' AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'HTML Format'))
+                OR (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'HTML Format')
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_TEXT')
+                OR lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_UNICODETEXT'))
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('PNG')))
+        )"""
+
+    elif ftype == 'text':
+        # Has text format, no images, no files, no HTML/RTF Format
+        return """AND (
+            (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_UNICODETEXT')
+            OR lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_TEXT'))
+            AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('HTML Format','CF_HDROP'))
+        )"""
+
+    return ''
 
 
 def decode_cf_text(blob: bytes) -> str:
@@ -173,7 +237,6 @@ def parse_hdrop(blob: bytes) -> list[str]:
 def get_best_text(lID: int, mtext: str, conn) -> tuple[str, str]:
     """
     Return (display_text, clip_type) for a Main record.
-    Reads Data rows ordered by format priority.
     """
     rows = conn.execute(
         "SELECT strClipBoardFormat, ooData FROM Data WHERE lParentID=? ORDER BY lID",
@@ -183,17 +246,57 @@ def get_best_text(lID: int, mtext: str, conn) -> tuple[str, str]:
     formats = [r['strClipBoardFormat'] for r in rows]
     clip_type = detect_clip_type(mtext, formats)
 
-    if clip_type == 'image':
-        return '[图片]', 'image'
+    # Image types
+    if clip_type in ('screenshot', 'copied_image', 'web_image'):
+        # For copied_image, extract filename from mText for display
+        if clip_type == 'copied_image' and mtext and mtext.startswith('Copied File'):
+            parts = mtext.strip().split(' - ')
+            if len(parts) >= 2:
+                return f'[Image] {parts[1]}', clip_type
+        return '[Image]', clip_type
 
+    # File paths
     if clip_type == 'file':
+        # Prioritize using CF_HDROP to parse path
         for r in rows:
             if r['strClipBoardFormat'] == 'CF_HDROP' and r['ooData']:
                 paths = parse_hdrop(bytes(r['ooData']))
-                return '\n'.join(paths) if paths else '[文件]', 'file'
-        return '[文件]', 'file'
+                if paths:
+                    return '\n'.join(paths), 'file'
+        # Extract path from mText
+        if mtext and mtext.startswith('Copied File'):
+            parts = mtext.strip().split(' - ')
+            if len(parts) >= 3:
+                return parts[2].strip(), 'file'
+        return '[File]', 'file'
 
-    for fmt in ('CF_UNICODETEXT', 'HTML Format', 'Rich Text Format', 'CF_TEXT'):
+    # Rich text: prioritize returning plain text for list display
+    if clip_type == 'richtext':
+        for fmt in ('CF_UNICODETEXT', 'CF_TEXT'):
+            for r in rows:
+                if r['strClipBoardFormat'] == fmt and r['ooData']:
+                    blob = bytes(r['ooData'])
+                    if fmt == 'CF_UNICODETEXT':
+                        try:
+                            b = blob
+                            while b.endswith(b'\x00\x00'):
+                                b = b[:-2]
+                            return b.decode('utf-16-le', errors='replace'), clip_type
+                        except Exception:
+                            pass
+                    else:
+                        return decode_cf_text(blob), clip_type
+
+        for r in rows:
+            if r['strClipBoardFormat'] == 'HTML Format' and r['ooData']:
+                raw = bytes(r['ooData']).decode('utf-8', errors='replace')
+                clean = re.sub(r'<[^>]+>', '', raw)
+                clean = re.sub(r'\s+', ' ', clean).strip()
+                return clean, clip_type
+        return mtext or '[Rich Text]', clip_type
+
+    # Plain text
+    for fmt in ('CF_UNICODETEXT', 'CF_TEXT'):
         for r in rows:
             if r['strClipBoardFormat'] == fmt and r['ooData']:
                 blob = bytes(r['ooData'])
@@ -202,43 +305,26 @@ def get_best_text(lID: int, mtext: str, conn) -> tuple[str, str]:
                         b = blob
                         while b.endswith(b'\x00\x00'):
                             b = b[:-2]
-                        text = b.decode('utf-16-le', errors='replace')
-                        return text, clip_type
+                        return b.decode('utf-16-le', errors='replace'), clip_type
                     except Exception:
                         pass
-                elif fmt == 'HTML Format':
-                    try:
-                        raw = blob.decode('utf-8', errors='replace')
-                        clean = re.sub(r'<[^>]+>', '', raw)
-                        clean = re.sub(r'\s+', ' ', clean).strip()
-                        return clean, 'html'
-                    except Exception:
-                        pass
-                elif fmt == 'Rich Text Format':
-                    try:
-                        raw = blob.decode('ascii', errors='replace')
-                        clean = re.sub(r'\\[a-z]+\d*\s?', '', raw)
-                        clean = re.sub(r'[{}]', '', clean).strip()
-                        return clean[:500], 'rtf'
-                    except Exception:
-                        pass
-                elif fmt == 'CF_TEXT':
+                else:
                     return decode_cf_text(blob), clip_type
 
     if mtext and mtext != 'CF_DIB':
         return mtext, clip_type
-    return '[无文本]', clip_type
+    return '[No Text]', clip_type
 
 
 def get_image_data(lID: int, conn) -> tuple[bytes | None, str]:
-    """Return image bytes and mimetype."""
+    """Return image bytes and mimetype. PNG preferred."""
     row = conn.execute(
         "SELECT ooData FROM Data WHERE lParentID=? AND strClipBoardFormat='PNG'",
         (lID,)
     ).fetchone()
     if row and row['ooData']:
         return bytes(row['ooData']), 'image/png'
-    
+
     row = conn.execute(
         "SELECT ooData FROM Data WHERE lParentID=? AND strClipBoardFormat='CF_DIB'",
         (lID,)
@@ -246,21 +332,21 @@ def get_image_data(lID: int, conn) -> tuple[bytes | None, str]:
     if row and row['ooData']:
         dib_data = bytes(row['ooData'])
         if dib_data.startswith(b'BM'):
-             return dib_data, 'image/bmp'
+            return dib_data, 'image/bmp'
         try:
             header_size = struct.unpack('<I', dib_data[:4])[0]
             bit_count = struct.unpack('<H', dib_data[14:16])[0]
             compression = struct.unpack('<I', dib_data[16:20])[0]
             clr_used = struct.unpack('<I', dib_data[32:36])[0]
-            
+
             if clr_used == 0 and bit_count <= 8:
                 clr_used = 1 << bit_count
-                
+
             pixel_offset = header_size + (clr_used * 4)
-            
+
             if compression == 3 and header_size == 40:
                 pixel_offset += 12
-                
+
             if bit_count == 32:
                 dib_mut = bytearray(dib_data)
                 for i in range(pixel_offset + 3, len(dib_mut), 4):
@@ -269,17 +355,17 @@ def get_image_data(lID: int, conn) -> tuple[bytes | None, str]:
 
             file_size = 14 + len(dib_data)
             offset = 14 + pixel_offset
-            
+
             bmp_header = struct.pack('<2sIHHI', b'BM', file_size, 0, 0, offset)
             return bmp_header + dib_data, 'image/bmp'
         except Exception:
             return dib_data, 'image/bmp'
-            
+
     return None, 'image/png'
 
 
 def get_html_data(lID: int, conn) -> str | None:
-    """Return raw HTML string for an html clip."""
+    """Return raw HTML string."""
     row = conn.execute(
         "SELECT ooData FROM Data WHERE lParentID=? AND strClipBoardFormat='HTML Format'",
         (lID,)
@@ -328,18 +414,7 @@ def api_clips():
     if pinned == '1':
         where.append("lDontAutoDelete = 1")
 
-    type_where = ''
-    if ftype == 'image':
-        type_where = "AND ((mText='CF_DIB' and lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('PNG','CF_DIB'))))"
-    elif ftype == 'file':
-        type_where = "AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_HDROP')"
-    elif ftype == 'html':
-        type_where = "AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='HTML Format')"
-    elif ftype == 'rtf':
-        type_where = "AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='Rich Text Format')"
-    elif ftype == 'text':
-        type_where = ("AND mText != 'CF_DIB' "
-                      "AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_HDROP','PNG'))")
+    type_where = _type_filter_sql(ftype)
 
     order = {
         'date_desc': 'lDate DESC',
@@ -404,7 +479,7 @@ def api_clip_detail(clip_id):
         ).fetchall()
 
         html_raw = None
-        if ctype == 'html':
+        if ctype == 'richtext':
             html_raw = get_html_data(clip_id, conn)
 
         return jsonify({
@@ -440,16 +515,41 @@ def api_stats():
     conn = get_db()
     try:
         total = conn.execute("SELECT COUNT(*) FROM Main WHERE bIsGroup=0").fetchone()[0]
-        pinned = conn.execute("SELECT COUNT(*) FROM Main WHERE bIsGroup=0 AND lDontAutoDelete=1").fetchone()[0]
-        images = conn.execute(
-            "SELECT COUNT(DISTINCT lParentID) FROM Data WHERE strClipBoardFormat IN ('PNG','CF_DIB')"
-        ).fetchone()[0]
-        files = conn.execute(
-            "SELECT COUNT(DISTINCT lParentID) FROM Data WHERE strClipBoardFormat='CF_HDROP'"
-        ).fetchone()[0]
-        html_c = conn.execute(
-            "SELECT COUNT(DISTINCT lParentID) FROM Data WHERE strClipBoardFormat='HTML Format'"
-        ).fetchone()[0]
+        total_images = conn.execute("""
+            SELECT COUNT(*) FROM Main
+            WHERE bIsGroup=0
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')
+                AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_HDROP','PNG')))
+                OR (mText = 'CF_DIB' AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')))
+        """).fetchone()[0]
+        # File paths
+        files = conn.execute("""
+            SELECT COUNT(*) FROM Main
+            WHERE bIsGroup=0 
+                AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_HDROP')
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_DIB','PNG'))
+            
+        """).fetchone()[0]
+
+        # Rich text
+        richtext = conn.execute("""
+            SELECT COUNT(*) FROM Main
+            WHERE bIsGroup=0
+                AND (mText = 'HTML Format' AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'HTML Format'))
+                OR (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'HTML Format')
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_TEXT')
+                OR lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_UNICODETEXT'))
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('PNG')))
+        """).fetchone()[0]
+
+        # Plain text
+        text_count = conn.execute("""
+            SELECT COUNT(*) FROM Main
+            WHERE bIsGroup=0
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_UNICODETEXT')
+                OR lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_TEXT'))
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('HTML Format','CF_HDROP'))
+        """).fetchone()[0]
 
         timeline = conn.execute("""
             SELECT date(lDate,'unixepoch','localtime') as day, COUNT(*) as cnt
@@ -483,68 +583,79 @@ def api_stats():
             SELECT COUNT(DISTINCT date(lDate, 'unixepoch', 'localtime')) FROM Main WHERE bIsGroup=0
         """).fetchone()
         active_days = active_days_row[0] if active_days_row else 1
-        
+
         days_diff = max(1, (newest - oldest) / 86400) if newest and oldest else 1
         avg_per_day = round(total / days_diff, 1)
-
+        # 1. Plain text size
         text_bytes = conn.execute("""
-            SELECT COALESCE(SUM(LENGTH(d.ooData)),0)
-            FROM Data d
-            JOIN Main m ON m.lID = d.lParentID
-            WHERE m.bIsGroup=0
-              AND d.strClipBoardFormat IN ('CF_UNICODETEXT','CF_TEXT')
-              AND m.mText != 'CF_DIB'
-              AND m.lID NOT IN (
-                  SELECT lParentID FROM Data
-                  WHERE strClipBoardFormat IN ('CF_HDROP','PNG','CF_DIB')
-              )
+            SELECT COALESCE(SUM(LENGTH(ooData)), 0)
+            FROM Data
+            WHERE lParentID IN (
+                SELECT lID FROM Main
+                WHERE bIsGroup=0
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_UNICODETEXT' OR strClipBoardFormat='CF_TEXT'))
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('HTML Format','CF_HDROP'))
+            )
         """).fetchone()[0]
 
-        image_bytes = conn.execute("""
-            SELECT COALESCE(SUM(LENGTH(d.ooData)),0)
-            FROM Data d
-            WHERE d.strClipBoardFormat IN ('PNG','CF_DIB')
+        # 2. Image (web image) size
+        total_image_bytes = conn.execute("""
+            SELECT COALESCE(SUM(LENGTH(ooData)), 0)
+            FROM Data
+            WHERE lParentID IN (
+                SELECT lID FROM Main
+                WHERE bIsGroup=0
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')
+                AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_HDROP','PNG')))
+                OR (mText='CF_DIB' AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB'))
+            )
         """).fetchone()[0]
 
-        html_bytes = conn.execute("""
-            SELECT COALESCE(SUM(LENGTH(d.ooData)),0)
-            FROM Data d
-            WHERE d.strClipBoardFormat = 'HTML Format'
-        """).fetchone()[0]
-
-        rtf_bytes = conn.execute("""
-            SELECT COALESCE(SUM(LENGTH(d.ooData)),0)
-            FROM Data d
-            WHERE d.strClipBoardFormat = 'Rich Text Format'
-        """).fetchone()[0]
-
+        # 3. File path size
         file_bytes = conn.execute("""
-            SELECT COALESCE(SUM(LENGTH(d.ooData)),0)
-            FROM Data d
-            WHERE d.strClipBoardFormat = 'CF_HDROP'
+            SELECT COALESCE(SUM(LENGTH(ooData)), 0)
+            FROM Data
+            WHERE lParentID IN (
+                SELECT lID FROM Main
+                WHERE bIsGroup=0
+                AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_HDROP')
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_DIB','PNG'))
+            )
         """).fetchone()[0]
-        
+
+        # 4. Rich text size
+        richtext_bytes = conn.execute("""
+            SELECT COALESCE(SUM(LENGTH(ooData)), 0)
+            FROM Data
+            WHERE lParentID IN (
+                SELECT lID FROM Main
+                WHERE bIsGroup=0
+                AND (mText='HTML Format' AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='HTML Format'))
+                OR (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='HTML Format')
+                AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_TEXT' OR strClipBoardFormat='CF_UNICODETEXT'))
+                AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('PNG')))
+            )
+        """).fetchone()[0]
+
         breakdown = [
-            {'type': 'text', 'bytes': text_bytes},
-            {'type': 'image', 'bytes': image_bytes},
-            {'type': 'html', 'bytes': html_bytes},
-            {'type': 'rtf', 'bytes': rtf_bytes},
-            {'type': 'file', 'bytes': file_bytes},
+            {'type': 'text',         'count': text_count,    'bytes': text_bytes},
+            {'type': 'richtext',     'count': richtext,      'bytes': richtext_bytes},
+            {'type': 'image',   'count': total_images,   'bytes': total_image_bytes},
+            {'type': 'file',         'count': files,         'bytes': file_bytes},
         ]
-        breakdown = [b for b in breakdown if b['bytes'] > 0]
+        breakdown = [b for b in breakdown if b['bytes'] > 0 or b['count'] > 0]
         breakdown.sort(key=lambda x: x['bytes'], reverse=True)
         total_bytes = sum(b['bytes'] for b in breakdown)
-        
+
         for item in breakdown:
             item['percentage'] = round((item['bytes'] / total_bytes) * 100, 1) if total_bytes > 0 else 0
 
         return jsonify({
             'total': total,
-            'pinned': pinned,
-            'images': images,
+            'images': total_images,
             'files': files,
-            'html': html_c,
-            'text': total - images - files - html_c,
+            'richtext': richtext,
+            'text': text_count,
             'oldest': oldest,
             'newest': newest,
             'timeline': [{'day': r['day'], 'cnt': r['cnt']} for r in timeline],
@@ -560,7 +671,6 @@ def api_stats():
         })
     finally:
         conn.close()
-
 
 @app.route('/api/duplicates')
 def api_duplicates():
@@ -594,6 +704,7 @@ def api_duplicates():
     finally:
         conn.close()
 
+
 @app.route('/api/cleanup/preview', methods=['POST'])
 def api_cleanup_preview():
     data = request.json
@@ -604,6 +715,7 @@ def api_cleanup_preview():
     import time
     now_ts = int(time.time())
 
+    # cleanup still uses broad format mapping (text/image/file), does not affect display logic
     TYPE_FORMAT_MAP = {
         'text':  ('CF_UNICODETEXT', 'CF_TEXT'),
         'image': ('PNG', 'CF_DIB'),
@@ -628,7 +740,6 @@ def api_cleanup_preview():
 
             fmt_placeholders = ','.join('?' * len(fmts))
 
-            # Get candidate parent IDs
             candidate_rows = conn.execute(f"""
                 SELECT DISTINCT m.lID
                 FROM Main m
@@ -645,7 +756,6 @@ def api_cleanup_preview():
             bytes_sum = 0
             for row in candidate_rows:
                 lid = row[0]
-                # Sum ooData bytes for this parent
                 b = conn.execute("""
                     SELECT COALESCE(SUM(LENGTH(ooData)), 0)
                     FROM Data WHERE lParentID = ?
@@ -735,10 +845,8 @@ def api_cleanup_run():
             freed_bytes += bytes_sum
             by_type.append({'type': rtype, 'count': count, 'bytes': bytes_sum})
 
-        # Deduplicate
         ids_to_delete = list(set(ids_to_delete))
 
-        # Delete in batches
         batch = 200
         for i in range(0, len(ids_to_delete), batch):
             chunk = ids_to_delete[i:i+batch]
@@ -761,6 +869,8 @@ def api_cleanup_run():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
 @app.route('/api/timeline')
 def api_timeline():
     conn = get_db()
@@ -819,12 +929,12 @@ def add_db_path():
     path = data.get('path', '').strip()
     if not path:
         return jsonify({'error': 'Path is required'}), 400
-    
+
     path = os.path.normpath(path).replace('\\', '/')
-    
+
     if path not in config.settings['db_paths']:
         config.settings['db_paths'].append(path)
-    
+
     config.settings['current_path'] = path
     config.save()
     return jsonify({'success': True, 'settings': config.settings})
@@ -836,7 +946,7 @@ def switch_db_path():
     path = data.get('path', '').strip()
     if path not in config.settings['db_paths']:
         return jsonify({'error': 'Path not found in list'}), 404
-    
+
     config.settings['current_path'] = path
     config.save()
     return jsonify({'success': True, 'settings': config.settings})
@@ -847,8 +957,8 @@ def remove_db_path():
     path = request.args.get('path', '').strip()
     if path in config.settings['db_paths']:
         if len(config.settings['db_paths']) <= 1:
-             return jsonify({'error': 'Cannot remove the last path'}), 400
-        
+            return jsonify({'error': 'Cannot remove the last path'}), 400
+
         config.settings['db_paths'].remove(path)
         if config.settings['current_path'] == path:
             config.settings['current_path'] = config.settings['db_paths'][0]
