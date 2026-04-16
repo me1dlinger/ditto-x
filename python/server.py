@@ -5,6 +5,7 @@ import struct
 import json
 from datetime import datetime, timezone
 from flask import Flask, jsonify, request, render_template, Response
+from concurrent.futures import ThreadPoolExecutor
 
 
 def get_resource_path(relative_path):
@@ -382,6 +383,8 @@ if not os.path.exists(template_dir):
 app = Flask(__name__, template_folder=template_dir)
 app.config['JSON_SORT_KEYS'] = False
 
+executor = ThreadPoolExecutor(max_workers=4)
+
 
 @app.route('/')
 def index():
@@ -510,29 +513,32 @@ def api_clip_image(clip_id):
         conn.close()
 
 
-@app.route('/api/stats')
-def api_stats():
-    conn = get_db()
-    try:
-        total = conn.execute("SELECT COUNT(*) FROM Main WHERE bIsGroup=0").fetchone()[0]
-        total_images = conn.execute("""
+def get_total_clips():
+    with get_db() as conn:
+        return conn.execute("SELECT COUNT(*) FROM Main WHERE bIsGroup=0").fetchone()[0]
+
+def get_total_images():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COUNT(*) FROM Main
             WHERE bIsGroup=0
                 AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')
                 AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_HDROP','PNG')))
                 OR (mText = 'CF_DIB' AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_DIB')))
         """).fetchone()[0]
-        # File paths
-        files = conn.execute("""
+
+def get_total_files():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COUNT(*) FROM Main
             WHERE bIsGroup=0 
                 AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat='CF_HDROP')
                 AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('CF_DIB','PNG'))
-            
         """).fetchone()[0]
 
-        # Rich text
-        richtext = conn.execute("""
+def get_total_richtext():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COUNT(*) FROM Main
             WHERE bIsGroup=0
                 AND (mText = 'HTML Format' AND lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'HTML Format'))
@@ -542,8 +548,9 @@ def api_stats():
                 AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('PNG')))
         """).fetchone()[0]
 
-        # Plain text
-        text_count = conn.execute("""
+def get_total_text_count():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COUNT(*) FROM Main
             WHERE bIsGroup=0
                 AND (lID IN (SELECT lParentID FROM Data WHERE strClipBoardFormat = 'CF_UNICODETEXT')
@@ -551,43 +558,56 @@ def api_stats():
                 AND lID NOT IN (SELECT lParentID FROM Data WHERE strClipBoardFormat IN ('HTML Format','CF_HDROP'))
         """).fetchone()[0]
 
-        timeline = conn.execute("""
+def get_timeline():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT date(lDate,'unixepoch','localtime') as day, COUNT(*) as cnt
             FROM Main WHERE bIsGroup=0
               AND lDate >= strftime('%s','now','-30 days')
             GROUP BY day ORDER BY day
         """).fetchall()
 
-        oldest = conn.execute("SELECT MIN(lDate) FROM Main WHERE bIsGroup=0").fetchone()[0]
-        newest = conn.execute("SELECT MAX(lDate) FROM Main WHERE bIsGroup=0").fetchone()[0]
+def get_oldest_clip():
+    with get_db() as conn:
+        return conn.execute("SELECT MIN(lDate) FROM Main WHERE bIsGroup=0").fetchone()[0]
 
-        hours = conn.execute("""
+def get_newest_clip():
+    with get_db() as conn:
+        return conn.execute("SELECT MAX(lDate) FROM Main WHERE bIsGroup=0").fetchone()[0]
+
+def get_hours_distribution():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT strftime('%H', lDate, 'unixepoch', 'localtime') as hr, COUNT(*) as cnt
             FROM Main WHERE bIsGroup=0
             GROUP BY hr ORDER BY hr
         """).fetchall()
 
-        last_24h = conn.execute("""
+def get_last_24h_clips():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT strftime('%Y-%m-%d %H', lDate, 'unixepoch', 'localtime') as hr_key, COUNT(*) as cnt
             FROM Main WHERE bIsGroup=0 AND lDate >= strftime('%s','now','-24 hours')
             GROUP BY hr_key ORDER BY hr_key
         """).fetchall()
 
-        last_7d = conn.execute("""
+def get_last_7d_clips():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT date(lDate,'unixepoch','localtime') as day, COUNT(*) as cnt
             FROM Main WHERE bIsGroup=0 AND lDate >= strftime('%s','now','-7 days')
             GROUP BY day ORDER BY day
         """).fetchall()
 
-        active_days_row = conn.execute("""
+def get_active_days():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COUNT(DISTINCT date(lDate, 'unixepoch', 'localtime')) FROM Main WHERE bIsGroup=0
-        """).fetchone()
-        active_days = active_days_row[0] if active_days_row else 1
+        """).fetchone()[0]
 
-        days_diff = max(1, (newest - oldest) / 86400) if newest and oldest else 1
-        avg_per_day = round(total / days_diff, 1)
-        # 1. Plain text size
-        text_bytes = conn.execute("""
+def get_text_bytes():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COALESCE(SUM(LENGTH(ooData)), 0)
             FROM Data
             WHERE lParentID IN (
@@ -598,8 +618,9 @@ def api_stats():
             )
         """).fetchone()[0]
 
-        # 2. Image (web image) size
-        total_image_bytes = conn.execute("""
+def get_image_bytes():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COALESCE(SUM(LENGTH(ooData)), 0)
             FROM Data
             WHERE lParentID IN (
@@ -611,8 +632,9 @@ def api_stats():
             )
         """).fetchone()[0]
 
-        # 3. File path size
-        file_bytes = conn.execute("""
+def get_file_bytes():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COALESCE(SUM(LENGTH(ooData)), 0)
             FROM Data
             WHERE lParentID IN (
@@ -623,8 +645,9 @@ def api_stats():
             )
         """).fetchone()[0]
 
-        # 4. Rich text size
-        richtext_bytes = conn.execute("""
+def get_richtext_bytes():
+    with get_db() as conn:
+        return conn.execute("""
             SELECT COALESCE(SUM(LENGTH(ooData)), 0)
             FROM Data
             WHERE lParentID IN (
@@ -637,40 +660,99 @@ def api_stats():
             )
         """).fetchone()[0]
 
-        breakdown = [
-            {'type': 'text',         'count': text_count,    'bytes': text_bytes},
-            {'type': 'richtext',     'count': richtext,      'bytes': richtext_bytes},
-            {'type': 'image',   'count': total_images,   'bytes': total_image_bytes},
-            {'type': 'file',         'count': files,         'bytes': file_bytes},
-        ]
-        breakdown = [b for b in breakdown if b['bytes'] > 0 or b['count'] > 0]
-        breakdown.sort(key=lambda x: x['bytes'], reverse=True)
-        total_bytes = sum(b['bytes'] for b in breakdown)
+@app.route('/api/stats')
+def api_stats():
+    futures = []
+    results = {}
 
-        for item in breakdown:
-            item['percentage'] = round((item['bytes'] / total_bytes) * 100, 1) if total_bytes > 0 else 0
+    futures.append(executor.submit(get_total_clips))
+    futures.append(executor.submit(get_total_images))
+    futures.append(executor.submit(get_total_files))
+    futures.append(executor.submit(get_total_richtext))
+    futures.append(executor.submit(get_total_text_count))
+    futures.append(executor.submit(get_timeline))
+    futures.append(executor.submit(get_oldest_clip))
+    futures.append(executor.submit(get_newest_clip))
+    futures.append(executor.submit(get_hours_distribution))
+    futures.append(executor.submit(get_last_24h_clips))
+    futures.append(executor.submit(get_last_7d_clips))
+    futures.append(executor.submit(get_active_days))
+    futures.append(executor.submit(get_text_bytes))
+    futures.append(executor.submit(get_image_bytes))
+    futures.append(executor.submit(get_file_bytes))
+    futures.append(executor.submit(get_richtext_bytes))
 
-        return jsonify({
-            'total': total,
-            'images': total_images,
-            'files': files,
-            'richtext': richtext,
-            'text': text_count,
-            'oldest': oldest,
-            'newest': newest,
-            'timeline': [{'day': r['day'], 'cnt': r['cnt']} for r in timeline],
-            'hours': [{'hr': r['hr'], 'cnt': r['cnt']} for r in hours],
-            'last_24h': [{'hr_key': r['hr_key'], 'cnt': r['cnt']} for r in last_24h],
-            'last_7d': [{'day': r['day'], 'cnt': r['cnt']} for r in last_7d],
-            'active_days': active_days,
-            'avg_per_day': avg_per_day,
-            'space': {
-                'total_bytes': total_bytes,
-                'breakdown': breakdown
-            }
-        })
-    finally:
-        conn.close()
+    # Collect results
+    for i, future in enumerate(futures):
+        if i == 0: results['total'] = future.result()
+        elif i == 1: results['total_images'] = future.result()
+        elif i == 2: results['files'] = future.result()
+        elif i == 3: results['richtext'] = future.result()
+        elif i == 4: results['text_count'] = future.result()
+        elif i == 5: results['timeline'] = future.result()
+        elif i == 6: results['oldest'] = future.result()
+        elif i == 7: results['newest'] = future.result()
+        elif i == 8: results['hours'] = future.result()
+        elif i == 9: results['last_24h'] = future.result()
+        elif i == 10: results['last_7d'] = future.result()
+        elif i == 11: results['active_days'] = future.result()
+        elif i == 12: results['text_bytes'] = future.result()
+        elif i == 13: results['total_image_bytes'] = future.result()
+        elif i == 14: results['file_bytes'] = future.result()
+        elif i == 15: results['richtext_bytes'] = future.result()
+
+    total = results['total']
+    total_images = results['total_images']
+    files = results['files']
+    richtext = results['richtext']
+    text_count = results['text_count']
+    timeline = results['timeline']
+    oldest = results['oldest']
+    newest = results['newest']
+    hours = results['hours']
+    last_24h = results['last_24h']
+    last_7d = results['last_7d']
+    active_days = results['active_days']
+    text_bytes = results['text_bytes']
+    total_image_bytes = results['total_image_bytes']
+    file_bytes = results['file_bytes']
+    richtext_bytes = results['richtext_bytes']
+
+    days_diff = max(1, (newest - oldest) / 86400) if newest and oldest else 1
+    avg_per_day = round(total / days_diff, 1)
+
+    breakdown = [
+        {'type': 'text',         'count': text_count,    'bytes': text_bytes},
+        {'type': 'richtext',     'count': richtext,      'bytes': richtext_bytes},
+        {'type': 'image',   'count': total_images,   'bytes': total_image_bytes},
+        {'type': 'file',         'count': files,         'bytes': file_bytes},
+    ]
+    breakdown = [b for b in breakdown if b['bytes'] > 0 or b['count'] > 0]
+    breakdown.sort(key=lambda x: x['bytes'], reverse=True)
+    total_bytes = sum(b['bytes'] for b in breakdown)
+
+    for item in breakdown:
+        item['percentage'] = round((item['bytes'] / total_bytes) * 100, 1) if total_bytes > 0 else 0
+
+    return jsonify({
+        'total': total,
+        'images': total_images,
+        'files': files,
+        'richtext': richtext,
+        'text': text_count,
+        'oldest': oldest,
+        'newest': newest,
+        'timeline': [{'day': r['day'], 'cnt': r['cnt']} for r in timeline],
+        'hours': [{'hr': r['hr'], 'cnt': r['cnt']} for r in hours],
+        'last_24h': [{'hr_key': r['hr_key'], 'cnt': r['cnt']} for r in last_24h],
+        'last_7d': [{'day': r['day'], 'cnt': r['cnt']} for r in last_7d],
+        'active_days': active_days,
+        'avg_per_day': avg_per_day,
+        'space': {
+            'total_bytes': total_bytes,
+            'breakdown': breakdown
+        }
+    })
 
 @app.route('/api/duplicates')
 def api_duplicates():
