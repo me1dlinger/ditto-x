@@ -1683,6 +1683,63 @@
             font-size: 11px;
             color: var(--text);
         }
+
+        /* 富文本渲染样式 */
+        .rendered-html-content {
+            font-family: var(--font-sans);
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text);
+            max-width: 100%;
+            overflow-wrap: break-word;
+        }
+
+        .rendered-html-content pre,
+        .rendered-html-content code {
+            font-family: var(--font-mono);
+            background: var(--panel);
+            padding: 8px 12px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow-x: auto;
+            display: block;
+            margin: 8px 0;
+        }
+
+        .rendered-html-content h1,
+        .rendered-html-content h2,
+        .rendered-html-content h3,
+        .rendered-html-content h4 {
+            color: var(--accent);
+            margin: 16px 0 8px 0;
+            font-weight: 600;
+        }
+
+        .rendered-html-content p {
+            margin: 8px 0;
+        }
+
+        .rendered-html-content ul,
+        .rendered-html-content ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .rendered-html-content a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .rendered-html-content a:hover {
+            text-decoration: underline;
+        }
+
+        .rendered-html-content blockquote {
+            border-left: 3px solid var(--border2);
+            padding-left: 12px;
+            margin: 8px 0;
+            color: var(--text2);
+        }
     </style>
 </head>
 
@@ -1805,6 +1862,8 @@
                             <div id="detail-meta"></div>
                         </div>
                         <div id="detail-body"></div>
+                        <div id="detail-rendered" style="display:none; flex:1; overflow-y:auto; padding:14px 16px;">
+                        </div>
                         <div id="detail-formats">
                             <div class="format-label">数据格式</div>
                             <div class="format-list" id="format-list"></div>
@@ -1812,6 +1871,7 @@
                         <div id="detail-actions">
                             <button class="action-btn" id="btn-copy">复制文本</button>
                             <button class="action-btn" id="btn-export">导出原文</button>
+                            <button class="action-btn" id="btn-render" style="display:none;">渲染富文本</button>
                         </div>
                     </div>
                 </div>
@@ -1944,6 +2004,7 @@
 
     <script>
         // ── State ──────────────────────────────────────────────────────────────────
+        let isRendered = false;
         const state = {
             page: 1, pageSize: 50,
             q: '', type: '', sort: 'date_desc',
@@ -2096,6 +2157,7 @@
                 const d = await apiFetch(`/api/clip/${id}`);
                 renderDetail(d);
             } catch (e) {
+                console.log(e)
                 $('detail-body').innerHTML = `<div style="color:var(--red);font-size:12px;">加载失败</div>`;
             }
         }
@@ -2118,12 +2180,51 @@
 
             // Body
             const body = $('detail-body');
+            const renderBtn = document.getElementById('btn-render');
+
             if (['screenshot', 'copied_image', 'web_image'].includes(d.type)) {
+                if (renderBtn && renderBtn.style.display == 'block') {
+                    renderBtn.style.display = 'none';
+                }
                 const src = `/api/clip/${d.id}/image`;
                 body.innerHTML = `<div class="detail-image-content">
       <img src="${src}" alt="图片" loading="lazy" onclick="openImagePreview('${src}')">
     </div>`;
-            } else {
+            }
+            else if (d.type === 'richtext') {
+                console.log(isRendered)
+                renderBtn.style.display = 'block';
+                renderBtn.textContent = '渲染富文本';
+                unRenderRichText();
+                isRendered = false;
+                renderBtn.onclick = () => toggleRichTextRender(d);
+                const renderedContainer = document.getElementById('detail-rendered');
+                const text = d.text || '[无内容]';
+                body.innerHTML = `<div class="detail-text-content">${escHtml(text)}</div>`;
+                if (d.html_raw) {
+                    const cleanHtml = extractHtmlFromClipboardData(d.html_raw);
+                    renderedContainer.innerHTML = `
+                <div class="rendered-html-content" style="
+                    font-family: var(--font-sans);
+                    font-size: 13px;
+                    line-height: 1.5;
+                    color: var(--text);
+                    max-width: 100%;
+                    overflow-wrap: break-word;
+                    padding: 10px;
+                ">
+                    ${cleanHtml}
+                </div>
+            `;
+                } else {
+                    renderedContainer.innerHTML = '<div class="detail-text-content">[无HTML格式数据]</div>';
+                }
+            }
+            else {
+                if (renderBtn && renderBtn.style.display == 'block') {
+                    renderBtn.style.display = 'none';
+                }
+
                 const text = d.text || '[无内容]';
                 body.innerHTML = `<div class="detail-text-content">${escHtml(text)}</div>`;
             }
@@ -2160,6 +2261,50 @@
             };
         }
 
+
+        function toggleRichTextRender(d) {
+            const body = document.getElementById('detail-body');
+            const renderedContainer = document.getElementById('detail-rendered');
+            const renderBtn = document.getElementById('btn-render');
+
+            if (!isRendered) {
+                // 切换到渲染视图
+                body.style.display = 'none';
+                renderedContainer.style.display = 'block';
+                renderBtn.textContent = '查看原始文本';
+            } else {
+                unRenderRichText();
+            }
+            isRendered = !isRendered;
+        }
+        function unRenderRichText() {
+            const body = document.getElementById('detail-body');
+            const renderedContainer = document.getElementById('detail-rendered');
+            const renderBtn = document.getElementById('btn-render');
+            body.style.display = 'block';
+            renderedContainer.style.display = 'none';
+            renderBtn.textContent = '渲染富文本';
+        }
+        function extractHtmlFromClipboardData(htmlData) {
+            if (!htmlData) return '';
+
+            // 尝试找到 <!--StartFragment--> 和 <!--EndFragment-->
+            const startIdx = htmlData.indexOf('<!--StartFragment-->');
+            const endIdx = htmlData.indexOf('<!--EndFragment-->');
+
+            if (startIdx !== -1 && endIdx !== -1) {
+                const fragment = htmlData.substring(startIdx + 20, endIdx);
+                return fragment.trim();
+            }
+
+            // 如果没有片段标记，尝试提取完整的HTML
+            const htmlMatch = htmlData.match(/<html[^>]*>([\s\S]*)<\/html>/i);
+            if (htmlMatch) {
+                return htmlMatch[0];
+            }
+
+            return htmlData;
+        }
         // ── Stats view ─────────────────────────────────────────────────────────────
         async function loadStats() {
             try {
