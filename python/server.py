@@ -79,6 +79,42 @@ def get_db():
 def row_to_dict(row):
     return dict(row)
 
+def get_db_rw():
+    """Open ditto.db in read-write mode for cleanup operations."""
+    db_path = config.db_path
+    if not os.path.exists(db_path):
+        alt_path = os.path.join(os.path.dirname(__file__), db_path)
+        if os.path.exists(alt_path):
+            db_path = alt_path
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA cache_size = -8000")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+
+def _build_cleanup_query(rules):
+    """
+    Build list of (type, ids, bytes) for given rules.
+    Rule: { type, days, size_kb }
+    Logic: age > days AND ooData total size > size_kb (for image/file), 
+           for text: size refers to CF_UNICODETEXT length.
+    Pinned (lDontAutoDelete=1) records are always excluded.
+    """
+    import time
+    now_ts = int(time.time())
+
+    TYPE_FORMAT_MAP = {
+        'text':  ['CF_UNICODETEXT', 'CF_TEXT'],
+        'image': ['PNG', 'CF_DIB'],
+        'file':  ['CF_HDROP'],
+    }
+
+    results = []
+
+    # We need a temporary read-only conn for preview too; caller passes conn
+    return results, TYPE_FORMAT_MAP, now_ts
 
 FORMAT_PRIORITY = [
     'CF_UNICODETEXT', 'CF_TEXT', 'HTML Format',
@@ -558,7 +594,173 @@ def api_duplicates():
     finally:
         conn.close()
 
+@app.route('/api/cleanup/preview', methods=['POST'])
+def api_cleanup_preview():
+    data = request.json
+    rules = data.get('rules', [])
+    if not rules:
+        return jsonify({'error': 'No rules provided'}), 400
 
+    import time
+    now_ts = int(time.time())
+
+    TYPE_FORMAT_MAP = {
+        'text':  ('CF_UNICODETEXT', 'CF_TEXT'),
+        'image': ('PNG', 'CF_DIB'),
+        'file':  ('CF_HDROP',),
+    }
+
+    conn = get_db()
+    try:
+        total_count = 0
+        total_bytes = 0
+        by_type = []
+
+        for rule in rules:
+            rtype = rule.get('type')
+            days = int(rule.get('days', 100))
+            size_kb = float(rule.get('size_kb', 0))
+            size_bytes = int(size_kb * 1024)
+            cutoff_ts = now_ts - days * 86400
+            fmts = TYPE_FORMAT_MAP.get(rtype)
+            if not fmts:
+                continue
+
+            fmt_placeholders = ','.join('?' * len(fmts))
+
+            # Get candidate parent IDs
+            candidate_rows = conn.execute(f"""
+                SELECT DISTINCT m.lID
+                FROM Main m
+                WHERE m.bIsGroup = 0
+                  AND m.lDontAutoDelete = 0
+                  AND m.lDate < ?
+                  AND m.lID IN (
+                      SELECT lParentID FROM Data
+                      WHERE strClipBoardFormat IN ({fmt_placeholders})
+                  )
+            """, [cutoff_ts] + list(fmts)).fetchall()
+
+            count = 0
+            bytes_sum = 0
+            for row in candidate_rows:
+                lid = row[0]
+                # Sum ooData bytes for this parent
+                b = conn.execute("""
+                    SELECT COALESCE(SUM(LENGTH(ooData)), 0)
+                    FROM Data WHERE lParentID = ?
+                """, (lid,)).fetchone()[0]
+                if b >= size_bytes:
+                    count += 1
+                    bytes_sum += b
+
+            total_count += count
+            total_bytes += bytes_sum
+            by_type.append({'type': rtype, 'count': count, 'bytes': bytes_sum})
+
+        return jsonify({
+            'total_count': total_count,
+            'total_bytes': total_bytes,
+            'by_type': by_type,
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/api/cleanup/run', methods=['POST'])
+def api_cleanup_run():
+    data = request.json
+    rules = data.get('rules', [])
+    if not rules:
+        return jsonify({'error': 'No rules provided'}), 400
+
+    import time
+    now_ts = int(time.time())
+
+    TYPE_FORMAT_MAP = {
+        'text':  ('CF_UNICODETEXT', 'CF_TEXT'),
+        'image': ('PNG', 'CF_DIB'),
+        'file':  ('CF_HDROP',),
+    }
+
+    conn = get_db_rw()
+    try:
+        conn.execute("BEGIN")
+
+        deleted_count = 0
+        freed_bytes = 0
+        by_type = []
+        ids_to_delete = []
+
+        for rule in rules:
+            rtype = rule.get('type')
+            days = int(rule.get('days', 100))
+            size_kb = float(rule.get('size_kb', 0))
+            size_bytes = int(size_kb * 1024)
+            cutoff_ts = now_ts - days * 86400
+            fmts = TYPE_FORMAT_MAP.get(rtype)
+            if not fmts:
+                continue
+
+            fmt_placeholders = ','.join('?' * len(fmts))
+
+            candidate_rows = conn.execute(f"""
+                SELECT DISTINCT m.lID
+                FROM Main m
+                WHERE m.bIsGroup = 0
+                  AND m.lDontAutoDelete = 0
+                  AND m.lDate < ?
+                  AND m.lID IN (
+                      SELECT lParentID FROM Data
+                      WHERE strClipBoardFormat IN ({fmt_placeholders})
+                  )
+            """, [cutoff_ts] + list(fmts)).fetchall()
+
+            count = 0
+            bytes_sum = 0
+            type_ids = []
+            for row in candidate_rows:
+                lid = row[0]
+                b = conn.execute("""
+                    SELECT COALESCE(SUM(LENGTH(ooData)), 0)
+                    FROM Data WHERE lParentID = ?
+                """, (lid,)).fetchone()[0]
+                if b >= size_bytes:
+                    type_ids.append(lid)
+                    count += 1
+                    bytes_sum += b
+
+            ids_to_delete.extend(type_ids)
+            deleted_count += count
+            freed_bytes += bytes_sum
+            by_type.append({'type': rtype, 'count': count, 'bytes': bytes_sum})
+
+        # Deduplicate
+        ids_to_delete = list(set(ids_to_delete))
+
+        # Delete in batches
+        batch = 200
+        for i in range(0, len(ids_to_delete), batch):
+            chunk = ids_to_delete[i:i+batch]
+            placeholders = ','.join('?' * len(chunk))
+            conn.execute(f"DELETE FROM Data WHERE lParentID IN ({placeholders})", chunk)
+            conn.execute(f"DELETE FROM Main WHERE lID IN ({placeholders})", chunk)
+
+        conn.execute("COMMIT")
+
+        remaining = conn.execute("SELECT COUNT(*) FROM Main WHERE bIsGroup=0").fetchone()[0]
+
+        return jsonify({
+            'deleted_count': deleted_count,
+            'freed_bytes': freed_bytes,
+            'remaining_count': remaining,
+            'by_type': by_type,
+        })
+    except Exception as e:
+        conn.execute("ROLLBACK")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 @app.route('/api/timeline')
 def api_timeline():
     conn = get_db()

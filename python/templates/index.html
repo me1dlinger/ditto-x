@@ -1326,6 +1326,368 @@
             display: inline-block;
             animation: countUp 0.5s ease forwards;
         }
+
+        /* ── Cleanup Rules ── */
+        .cleanup-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius2);
+            margin: 0 24px 20px;
+            overflow: hidden;
+        }
+
+        .cleanup-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .cleanup-card-header:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .cleanup-card-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text3);
+        }
+
+        .cleanup-card-toggle {
+            font-size: 11px;
+            color: var(--text3);
+            transition: transform .2s;
+        }
+
+        .cleanup-card.open .cleanup-card-toggle {
+            transform: rotate(180deg);
+        }
+
+        .cleanup-card-body {
+            display: none;
+            padding: 16px 20px;
+        }
+
+        .cleanup-card.open .cleanup-card-body {
+            display: block;
+        }
+
+        .cleanup-rules-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .cleanup-rule-item {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 14px;
+            transition: border-color .15s;
+        }
+
+        .cleanup-rule-item.enabled {
+            border-color: var(--border2);
+        }
+
+        .cleanup-rule-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .cleanup-rule-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        /* Toggle switch */
+        .toggle-switch {
+            position: relative;
+            width: 32px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            display: none;
+        }
+
+        .toggle-switch-track {
+            position: absolute;
+            inset: 0;
+            background: var(--border2);
+            border-radius: 9px;
+            cursor: pointer;
+            transition: background .2s;
+        }
+
+        .toggle-switch input:checked+.toggle-switch-track {
+            background: var(--accent);
+        }
+
+        .toggle-switch-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #fff;
+            transition: transform .2s;
+        }
+
+        .toggle-switch input:checked+.toggle-switch-track::after {
+            transform: translateX(14px);
+        }
+
+        .cleanup-rule-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .cleanup-rule-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cleanup-rule-field label {
+            font-size: 11px;
+            color: var(--text2);
+            width: 58px;
+            flex-shrink: 0;
+        }
+
+        .cleanup-rule-field input[type="number"] {
+            width: 100%;
+            padding: 5px 8px;
+            background: var(--panel);
+            border: 1px solid var(--border2);
+            color: var(--text);
+            border-radius: var(--radius);
+            font-size: 12px;
+            font-family: var(--font-mono);
+            outline: none;
+            transition: border .15s;
+        }
+
+        .cleanup-rule-field input[type="number"]:focus {
+            border-color: var(--accent);
+        }
+
+        .cleanup-rule-field input:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .cleanup-rule-field .field-unit {
+            font-size: 10px;
+            color: var(--text3);
+            white-space: nowrap;
+        }
+
+        .cleanup-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-preview-cleanup {
+            padding: 7px 18px;
+            background: var(--panel);
+            border: 1px solid var(--border2);
+            color: var(--text2);
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: var(--font-sans);
+            transition: all .15s;
+        }
+
+        .btn-preview-cleanup:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-run-cleanup {
+            padding: 7px 18px;
+            background: var(--red);
+            border: none;
+            color: #fff;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: var(--font-sans);
+            transition: opacity .15s;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .btn-run-cleanup.ready {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .btn-run-cleanup.ready:hover {
+            opacity: 0.85;
+        }
+
+        /* Preview panel */
+        .cleanup-preview {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            margin-top: 14px;
+            display: none;
+        }
+
+        .cleanup-preview.show {
+            display: block;
+        }
+
+        .cleanup-preview-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text3);
+            margin-bottom: 10px;
+        }
+
+        .cleanup-preview-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .cleanup-preview-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .cleanup-preview-row .label {
+            color: var(--text2);
+        }
+
+        .cleanup-preview-row .val {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text);
+        }
+
+        .cleanup-preview-row .val.danger {
+            color: var(--red);
+        }
+
+        /* Result report */
+        .cleanup-result {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            margin-top: 14px;
+            display: none;
+        }
+
+        .cleanup-result.show {
+            display: block;
+        }
+
+        .cleanup-result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .cleanup-result-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--green);
+        }
+
+        .cleanup-result-close {
+            font-size: 14px;
+            color: var(--text3);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+
+        .cleanup-result-close:hover {
+            color: var(--text);
+        }
+
+        .cleanup-result-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .cleanup-result-stat {
+            background: var(--panel);
+            border-radius: var(--radius);
+            padding: 10px 12px;
+        }
+
+        .cleanup-result-stat .r-val {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+
+        .cleanup-result-stat .r-label {
+            font-size: 11px;
+            color: var(--text3);
+        }
+
+        .cleanup-result-by-type {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .cleanup-result-type-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text2);
+            padding: 4px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .cleanup-result-type-row:last-child {
+            border-bottom: none;
+        }
+
+        .cleanup-result-type-row .tv {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text);
+        }
     </style>
 </head>
 
@@ -1469,6 +1831,37 @@
                     <div class="space-bar-track" id="space-bar-track"></div>
                     <div class="space-legend" id="space-legend"></div>
                 </div>
+                <!-- Cleanup Rules Card -->
+                <div class="cleanup-card" id="cleanup-card">
+                    <div class="cleanup-card-header" onclick="toggleCleanupCard()">
+                        <span class="cleanup-card-title">可配置清理规则</span>
+                        <span class="cleanup-card-toggle" id="cleanup-card-caret">&#9660;</span>
+                    </div>
+                    <div class="cleanup-card-body">
+                        <div class="cleanup-rules-grid" id="cleanup-rules-grid">
+                            <!-- JS render -->
+                        </div>
+                        <div class="cleanup-actions">
+                            <button class="btn-preview-cleanup" id="btn-preview-cleanup"
+                                onclick="runCleanupPreview()">预览影响范围</button>
+                            <button class="btn-run-cleanup" id="btn-run-cleanup" onclick="runCleanup()">执行清理</button>
+                        </div>
+                        <div class="cleanup-preview" id="cleanup-preview">
+                            <div class="cleanup-preview-title">清理预览</div>
+                            <div class="cleanup-preview-rows" id="cleanup-preview-rows"></div>
+                            <div style="font-size:11px;color:var(--text3);">预览完成后，点击"执行清理"正式删除</div>
+                        </div>
+                        <div class="cleanup-result" id="cleanup-result">
+                            <div class="cleanup-result-header">
+                                <span class="cleanup-result-title">清理完成</span>
+                                <button class="cleanup-result-close"
+                                    onclick="$('cleanup-result').classList.remove('show')">x</button>
+                            </div>
+                            <div class="cleanup-result-grid" id="cleanup-result-grid"></div>
+                            <div class="cleanup-result-by-type" id="cleanup-result-by-type"></div>
+                        </div>
+                    </div>
+                </div>
                 <div class="stats-grid" id="stats-grid"></div>
 
                 <div class="stats-row">
@@ -1564,7 +1957,12 @@
             selectedId: null,
             totalClips: 0,
         };
-
+        // ── Cleanup Rules State ────────────────────────────────────────────────────
+        const cleanupRules = {
+            text: { enabled: false, days: 100, size_kb: 0 },
+            image: { enabled: false, days: 100, size_kb: 100 },
+            file: { enabled: false, days: 100, size_kb: 0 },
+        };
         // ── DOM refs ──────────────────────────────────────────────────────────────
         const $ = id => document.getElementById(id);
         const $$ = s => document.querySelectorAll(s);
@@ -1911,6 +2309,178 @@
             } catch (e) {
                 $('stats-grid').innerHTML = `<div style="color:var(--red)">加载失败: ${e.message}</div>`;
             }
+        }
+        function toggleCleanupCard() {
+            $('cleanup-card').classList.toggle('open');
+            if ($('cleanup-card').classList.contains('open')) {
+                renderCleanupRules();
+            }
+        }
+
+        function renderCleanupRules() {
+            const TYPE_LABELS = { image: '图片', text: '文本', file: '文件' };
+            const grid = $('cleanup-rules-grid');
+            grid.innerHTML = Object.entries(cleanupRules).map(([type, rule]) => `
+        <div class="cleanup-rule-item ${rule.enabled ? 'enabled' : ''}" id="rule-item-${type}">
+            <div class="cleanup-rule-header">
+                <span class="cleanup-rule-label">${TYPE_LABELS[type]}</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="rule-en-${type}" ${rule.enabled ? 'checked' : ''}
+                        onchange="onRuleToggle('${type}', this.checked)">
+                    <span class="toggle-switch-track"></span>
+                </label>
+            </div>
+            <div class="cleanup-rule-fields">
+                <div class="cleanup-rule-field">
+                    <label>时间阈值</label>
+                    <input type="number" id="rule-days-${type}" value="${rule.days}" min="1"
+                        ${!rule.enabled ? 'disabled' : ''}
+                        onchange="onRuleField('${type}','days',+this.value)">
+                    <span class="field-unit">天以上</span>
+                </div>
+                <div class="cleanup-rule-field">
+                    <label>大小阈值</label>
+                    <input type="number" id="rule-size-${type}" value="${rule.size_kb}" min="0"
+                        ${!rule.enabled ? 'disabled' : ''}
+                        onchange="onRuleField('${type}','size_kb',+this.value)">
+                    <span class="field-unit">KB 以上</span>
+                </div>
+            </div>
+        </div>
+    `).join('');
+        }
+
+        function onRuleToggle(type, enabled) {
+            cleanupRules[type].enabled = enabled;
+            const item = $(`rule-item-${type}`);
+            item.classList.toggle('enabled', enabled);
+            [`rule-days-${type}`, `rule-size-${type}`].forEach(id => {
+                $(id).disabled = !enabled;
+            });
+            // Reset preview if rules change
+            $('cleanup-preview').classList.remove('show');
+            $('btn-run-cleanup').classList.remove('ready');
+        }
+
+        function onRuleField(type, field, val) {
+            cleanupRules[type][field] = val;
+            $('cleanup-preview').classList.remove('show');
+            $('btn-run-cleanup').classList.remove('ready');
+        }
+
+        async function runCleanupPreview() {
+            const activeRules = Object.entries(cleanupRules)
+                .filter(([, r]) => r.enabled)
+                .map(([type, r]) => ({ type, days: r.days, size_kb: r.size_kb }));
+            if (!activeRules.length) { toast('请至少启用一条清理规则'); return; }
+
+            const btn = $('btn-preview-cleanup');
+            btn.textContent = '计算中...';
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/cleanup/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rules: activeRules })
+                });
+                const d = await res.json();
+                if (d.error) throw new Error(d.error);
+
+                const TYPE_LABELS = { text: '文本', image: '图片', file: '文件' };
+                const rows = $('cleanup-preview-rows');
+                rows.innerHTML = `
+            <div class="cleanup-preview-row">
+                <span class="label">预计删除条目</span>
+                <span class="val danger">${d.total_count.toLocaleString()} 条</span>
+            </div>
+            <div class="cleanup-preview-row">
+                <span class="label">预计释放空间</span>
+                <span class="val danger">${fmtBytesClean(d.total_bytes)}</span>
+            </div>
+            ${d.by_type.map(t => `
+            <div class="cleanup-preview-row">
+                <span class="label" style="color:var(--text3)">${TYPE_LABELS[t.type] || t.type}</span>
+                <span class="val">${t.count} 条 / ${fmtBytesClean(t.bytes)}</span>
+            </div>`).join('')}
+        `;
+                $('cleanup-preview').classList.add('show');
+                if (d.total_count > 0) {
+                    $('btn-run-cleanup').classList.add('ready');
+                }
+            } catch (e) {
+                toast('预览失败: ' + e.message);
+            } finally {
+                btn.textContent = '预览影响范围';
+                btn.disabled = false;
+            }
+        }
+
+        async function runCleanup() {
+            if (!confirm('确认执行清理？此操作将永久删除记录，无法撤销。')) return;
+            const activeRules = Object.entries(cleanupRules)
+                .filter(([, r]) => r.enabled)
+                .map(([type, r]) => ({ type, days: r.days, size_kb: r.size_kb }));
+
+            const btn = $('btn-run-cleanup');
+            btn.textContent = '执行中...';
+            btn.disabled = true;
+            try {
+                const t0 = Date.now();
+                const res = await fetch('/api/cleanup/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rules: activeRules })
+                });
+                const d = await res.json();
+                if (d.error) throw new Error(d.error);
+                const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+
+                const TYPE_LABELS = { text: '文本', image: '图片', file: '文件' };
+                const grid = $('cleanup-result-grid');
+                grid.innerHTML = `
+            <div class="cleanup-result-stat">
+                <div class="r-val">${d.deleted_count.toLocaleString()}</div>
+                <div class="r-label">已删除条目</div>
+            </div>
+            <div class="cleanup-result-stat">
+                <div class="r-val">${fmtBytesClean(d.freed_bytes)}</div>
+                <div class="r-label">释放空间</div>
+            </div>
+            <div class="cleanup-result-stat">
+                <div class="r-val">${elapsed}s</div>
+                <div class="r-label">清理耗时</div>
+            </div>
+            <div class="cleanup-result-stat">
+                <div class="r-val">${d.remaining_count.toLocaleString()}</div>
+                <div class="r-label">剩余条目</div>
+            </div>
+        `;
+                $('cleanup-result-by-type').innerHTML = d.by_type.map(t => `
+            <div class="cleanup-result-type-row">
+                <span>${TYPE_LABELS[t.type] || t.type}</span>
+                <span class="tv">${t.count} 条 / ${fmtBytesClean(t.bytes)}</span>
+            </div>
+        `).join('');
+                $('cleanup-result').classList.add('show');
+                $('cleanup-preview').classList.remove('show');
+                $('btn-run-cleanup').classList.remove('ready');
+                toast('清理完成');
+                loadStats();
+                loadMiniStats();
+            } catch (e) {
+                toast('清理失败: ' + e.message);
+            } finally {
+                btn.textContent = '执行清理';
+                btn.disabled = false;
+            }
+        }
+
+        function fmtBytesClean(b) {
+            if (!b) return '0 B';
+            if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+            if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+            if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+            return b + ' B';
         }
         // ── Duplicates view ────────────────────────────────────────────────────────
         async function loadDuplicates() {
