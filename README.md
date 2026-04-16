@@ -4,12 +4,11 @@
 
 ## 功能特性
 
-- 只读访问 Ditto 的 SQLite 数据库（开启 PRAGMA query\_only 与 URI mode=ro）
 - 列表浏览：分页、类型徽标、置顶标记、相对时间显示
 - 搜索与过滤：全文搜索、类型筛选（文本/HTML/图片/文件/RTF）、时间范围、排序（最新/最旧/字母）
-- 详情面板：原文/图片预览、格式列表、复制文本、导出原文或图片
-- 统计面板：总体计数、过去 30 天活跃度、过去 7 天趋势、小时分布、最近 24 小时分布、活跃天数与日均复制
-- <br />
+- 详情面板：原文/图片预览、带格式文本预览、格式列表、复制文本、导出原文或图片
+- 统计面板：存储空间占用、总体计数、过去 30 天活跃度、过去 7 天趋势、小时分布、最近 24 小时分布、活跃天数与日均复制
+- 数据清洗：按照大小、时间范围、类型等条件清洗数据，删除历史无用项
 - 多数据库路径管理：添加/切换/删除路径，配置持久化到 settings.json
 
 ## 界面预览
@@ -26,6 +25,12 @@
 
 支持图片类型剪贴项的预览和全屏查看
 
+### 带格式文本类型剪贴项预览
+
+![带格式文本预览](screenshots/image2.1.png)
+
+支持带格式文本类型剪贴项的渲染
+
 ### 剪贴项统计
 
 ![统计面板](screenshots/image3.png)
@@ -37,7 +42,8 @@
 - assets/
   - ditto-x.ico（托盘图标）
 - python/
-  - app.py（后端与托盘主程序） [app.py](file:///e:/Fun/code/ditto-x-1/python/app.py)
+  - app.py（托盘主程序） [app.py](file:///e:/Fun/code/ditto-x-1/python/app.py)
+  - server.py（后端服务） [server.py](file:///e:/Fun/code/ditto-x-1/python/server.py)
   - templates/
     - index.html（前端单页） [index.html](file:///e:/Fun/code/ditto-x-1/python/templates/index.html)
 - LICENSE（GPL-3.0）
@@ -64,7 +70,7 @@ pip install -r python/requirements.txt
 1. 启动服务
 
 ```bash
-python python/app.py
+python python/server.py
 ```
 
 启动后程序会：
@@ -75,15 +81,14 @@ python python/app.py
 
 ## 核心能力说明
 
-- 类型识别：根据 Data 表格式（CF\_UNICODETEXT/CF\_TEXT/HTML Format/Rich Text Format/CF\_HDROP/PNG/CF\_DIB）推断为文本、HTML、RTF、文件或图片
+- 类型识别：根据 Data 表格式（CF\_UNICODETEXT/CF\_TEXT/HTML Format/Rich Text Format/CF\_HDROP/PNG/CF\_DIB）推断为文本、RTF、文件或图片
 - 文本展示：优先 UNICODETEXT → HTML 清洗 → RTF 清洗 → CF\_TEXT → Main.mText
 - 图片处理：优先返回 PNG；如仅有 CF\_DIB，尝试补齐 BMP 文件头并规避透明度导致的“黑图”问题；导出为 PNG 或 BMP
-- 只读保障：数据库以 file:<path>?mode=ro 方式连接，并开启 PRAGMA query\_only
 
 ## 常用接口
 
 - GET /api/clips：分页列表
-  - 参数：page、page\_size、q、type、date\_from、date\_to、sort、pinned
+  - 参数：page、page_size、q、type、date_from、date_to、sort、pinned
 - GET /api/clip/{id}：单条详情（含格式列表与 HTML 原文）
 - GET /api/clip/{id}/image：图片字节流（PNG/BMP）
 - GET /api/stats：计数与时序统计
@@ -91,7 +96,9 @@ python python/app.py
 - GET /api/timeline：日历视图聚合
 - GET /api/search/suggest：搜索联想
 - GET /api/db/info：当前数据库文件信息
-- GET /api/config：获取配置（db\_paths/current\_path）
+- POST /api/cleanup/preview：清理预览（body: { rules: [] }）
+- POST /api/cleanup/run：执行清理（body: { rules: [] }）
+- GET /api/config：获取配置（db_paths/current_path）
 - POST /api/config/path：添加并切换路径（body: { path }）
 - POST /api/config/switch：切换当前路径（body: { path }）
 - DELETE /api/config/path：移除路径（query: path）
@@ -101,18 +108,14 @@ python python/app.py
 已适配 PyInstaller 的资源路径处理（sys.\_MEIPASS）。示例命令（根据需要调整）：
 
 ```bash
-pyinstaller -F ^
-  --name DittoX ^
-  --add-data "python/templates;python/templates" ^
-  --add-data "assets;assets" ^
-  python/app.py
+python python/build_exe.py
 ```
 
 ## 注意事项
 
 - 本项目仅提供只读浏览、检索与导出，不对 Ditto 数据库进行写入
 - 请确保 Ditto.db 路径正确且可读；如路径包含中文或空格，建议在“设置”页添加并切换
-- 如果端口被占用，请修改 app.py 中的端口或释放占用端口
+- 如果端口被占用，请修改 server.py/app.py中的端口或释放占用端口
 
 ## 许可证
 
