@@ -1238,6 +1238,94 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
+
+        /* ── Space Visualization ── */
+        .space-viz-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius2);
+            padding: 20px 24px;
+            margin: 0 24px 24px;
+        }
+
+        .space-viz-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text3);
+            margin-bottom: 16px;
+        }
+
+        .space-bar-track {
+            height: 32px;
+            border-radius: 4px;
+            display: flex;
+            overflow: hidden;
+            background: var(--border);
+            margin-bottom: 14px;
+        }
+
+        .space-bar-seg {
+            height: 100%;
+            transform-origin: left;
+            transform: scaleX(0);
+            transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+            position: relative;
+        }
+
+        .space-bar-seg:first-child {
+            border-radius: 4px 0 0 4px;
+        }
+
+        .space-bar-seg:last-child {
+            border-radius: 0 4px 4px 0;
+        }
+
+        .space-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .space-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12px;
+            color: var(--text2);
+        }
+
+        .space-legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .space-legend-val {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text3);
+        }
+
+        /* number counter animation */
+        @keyframes countUp {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .space-num-anim {
+            display: inline-block;
+            animation: countUp 0.5s ease forwards;
+        }
     </style>
 </head>
 
@@ -1375,6 +1463,12 @@
 
             <!-- ── Stats view ── -->
             <div id="view-stats" class="view-page">
+                <!-- Space Visualization -->
+                <div class="space-viz-card" id="space-viz-card" style="display:none;">
+                    <div class="space-viz-title">存储空间占比</div>
+                    <div class="space-bar-track" id="space-bar-track"></div>
+                    <div class="space-legend" id="space-legend"></div>
+                </div>
                 <div class="stats-grid" id="stats-grid"></div>
 
                 <div class="stats-row">
@@ -1606,7 +1700,7 @@
 
         function renderDetail(d) {
             // Meta
-            const badgeMap = { image: 'image', file: 'file', html: 'HTML', rtf: 'RTF', text: '文本' };
+            const badgeMap = { image: 'image', file: 'file_path', html: 'HTML', rtf: 'RTF', text: '文本' };
             $('detail-meta').innerHTML = `
     <span class="clip-badge badge-${d.type}">${badgeMap[d.type] || d.type}</span>
     <span class="clip-badge" style="background:var(--panel);color:var(--text2)">${fmtDateFull(d.date)}</span>
@@ -1674,10 +1768,10 @@
                     ['活跃天数', d.active_days],
                     ['日均复制', d.avg_per_day],
                 ].map(([label, val]) => `
-      <div class="stat-card">
-        <div class="stat-card-val">${val.toLocaleString()}</div>
-        <div class="stat-card-label">${label}</div>
-      </div>`).join('');
+  <div class="stat-card">
+    <div class="stat-card-val">${val.toLocaleString()}</div>
+    <div class="stat-card-label">${label}</div>
+  </div>`).join('');
 
                 // 30 Days Activity Heatmap (Last 30 days)
                 const bars = $('timeline-bars');
@@ -1686,9 +1780,9 @@
                     const intensity = Math.max(0.05, (x.cnt / maxCnt) * 0.95);
                     const label = x.day.slice(5); // MM-DD
                     return `<div class="bar-col" title="${x.day}: ${x.cnt} 条">
-        <div class="bar" style="opacity:${intensity}"></div>
-        <div class="bar-label">${label}</div>
-      </div>`;
+    <div class="bar" style="opacity:${intensity}"></div>
+    <div class="bar-label">${label}</div>
+  </div>`;
                 }).join('');
 
                 // 7 Days Trend (Bar style)
@@ -1698,9 +1792,9 @@
                     const pct = Math.max(4, Math.round((x.cnt / max7d) * 100));
                     const label = x.day.slice(5);
                     return `<div class="bar-col" title="${x.day}: ${x.cnt} 条">
-        <div class="bar bar-trend" style="--h:${pct}%"></div>
-        <div class="bar-label">${label}</div>
-      </div>`;
+    <div class="bar bar-trend" style="--h:${pct}%"></div>
+    <div class="bar-label">${label}</div>
+  </div>`;
                 }).join('');
 
                 // Hour Heatmap (All time)
@@ -1740,11 +1834,84 @@
                     return `<div class="hour-cell" style="background:${color}" data-tip="${x.key}:00  ${x.cnt}条"></div>`;
                 }).join('');
 
+                // ── Space Visualization ──
+                if (d.space && d.space.total_bytes > 0) {
+                    const sv = d.space;
+                    const card = $('space-viz-card');
+                    const track = $('space-bar-track');
+                    const legend = $('space-legend');
+                    card.style.display = '';
+
+                    // 配色：文本、图片、HTML、富文本、文件
+                    const COLORS = {
+                        text: '#4f8ef7',
+                        image: '#9b72e0',
+                        html: '#3dba6a',
+                        rtf: '#d4a847',
+                        file: '#e8833a',
+                    };
+                    const LABELS = { text: '文本', image: '图片', html: 'HTML', rtf: '富文本', file: '文件' };
+
+                    const total = sv.total_bytes || 1;
+
+                    function fmtBytes(b) {
+                        if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+                        if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+                        if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+                        return b + ' B';
+                    }
+
+                    function animateNum(el, target, fmt) {
+                        const dur = 900, start = performance.now();
+                        function tick(now) {
+                            const p = Math.min((now - start) / dur, 1);
+                            const ease = 1 - Math.pow(1 - p, 3);
+                            el.textContent = fmt(Math.round(ease * target));
+                            if (p < 1) requestAnimationFrame(tick);
+                        }
+                        requestAnimationFrame(tick);
+                    }
+
+                    track.innerHTML = '';
+                    legend.innerHTML = '';
+
+                    sv.breakdown.forEach((item, i) => {
+                        const pct = item.bytes / total;
+                        const color = COLORS[item.type] || '#555';
+
+                        // Bar segment
+                        const seg = document.createElement('div');
+                        seg.className = 'space-bar-seg';
+                        seg.style.cssText = `width:${(pct * 100).toFixed(3)}%;background:${color};`;
+                        seg.title = `${LABELS[item.type] || item.type}: ${fmtBytes(item.bytes)}`;
+                        track.appendChild(seg);
+
+                        // Stagger expand animation
+                        setTimeout(() => { seg.style.transform = 'scaleX(1)'; }, i * 80);
+
+                        // Legend item
+                        const li = document.createElement('div');
+                        li.className = 'space-legend-item';
+                        const pctDisplay = (pct * 100).toFixed(1);
+                        li.innerHTML = `
+        <span class="space-legend-dot" style="background:${color}"></span>
+        <span>${LABELS[item.type] || item.type}</span>
+        <span class="space-legend-val" id="sv-val-${item.type}">—</span>
+        <span class="space-legend-val" style="color:var(--text3);">(${pctDisplay}%)</span>
+    `;
+                        legend.appendChild(li);
+
+                        // Animate number
+                        setTimeout(() => {
+                            const valEl = $(`sv-val-${item.type}`);
+                            if (valEl) animateNum(valEl, item.bytes, b => fmtBytes(b));
+                        }, 300 + i * 80);
+                    });
+                }
             } catch (e) {
                 $('stats-grid').innerHTML = `<div style="color:var(--red)">加载失败: ${e.message}</div>`;
             }
         }
-
         // ── Duplicates view ────────────────────────────────────────────────────────
         async function loadDuplicates() {
             try {

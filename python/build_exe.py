@@ -20,6 +20,8 @@ args = [
     # Add templates and assets folder
     f'--add-data={templates_path};templates',
     f'--add-data={assets_path};static/icon',
+    # Include server.py
+    f'--add-data=server.py;.',
     # Exclude unnecessary modules to reduce size
     '--exclude-module=tkinter',
     '--exclude-module=unittest',
